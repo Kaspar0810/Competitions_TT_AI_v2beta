@@ -30845,7 +30845,7 @@ class MainWindow(QMainWindow):
                 mesto_first = 1
             else:
                 # mesto_first = mesta_exit + 1
-                 mesto_first = 3
+                mesto_first = 3
             # Создаем полуфинал
             if stage == "Квалификация. 1-й полуфинал":
                 sf_groups = self.create_semi_final_1(mesto_first, total_group)
@@ -31328,7 +31328,6 @@ class MainWindow(QMainWindow):
                             loser=previous_match.loser,
                             points_loser=previous_match.points_loser,
                             score_loser=previous_match.score_loser,
-                            # round=previous_match.round,
                             schedule_date=previous_match.schedule_date,
                             schedule_time=previous_match.schedule_time,
                             schedule_table=previous_match.schedule_table,
