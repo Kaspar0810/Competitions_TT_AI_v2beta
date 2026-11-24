@@ -93,7 +93,7 @@ class ChoiceActionDialog(QDialog):
 
 # ========== ОСНОВНОЙ КЛАСС ЖЕРЕБЬЕВКИ ==========
 class ChoiceGroupManual(QDialog):
-    def __init__(self, athletes, num_groups, id_title, parent=None, existing_data=None):
+    def __init__(self, athletes, num_groups, id_title, sex, parent=None, existing_data=None):
         super().__init__(parent)
         self.athletes = athletes
         self.sorted_athletes = []
@@ -106,6 +106,7 @@ class ChoiceGroupManual(QDialog):
         self.current_round = 1
         self.max_rows_per_group = 0
         self.existing_data = existing_data
+        self.sex = sex
         self.initUI()
 # ========= new
         # F11 — переключение полного экрана
@@ -1594,19 +1595,23 @@ class SemiFinalManual(QDialog):
         self.prepare_data()
        
         self.update_interface()
-
+   
     def prepare_data(self):
-        """SF1 = 1-2 места, SF2 = 3-4 места.
+        """SF1 = 1-2 места, SF2 = 3-4 места квалификации.
 
-        Авто: QG1..QG(half) → позиции 0,1 каждого SF-группы.
-        Ручной список: QG(total)..QG(half+1) (убывание) — чтобы
-        первые два игрока легли рядом с QG1 (1↔32), следующие — с QG2 (2↔31).
+        Авто: QG1..QG(half) → позиции 0,1 в SF-группах (по номеру QG).
+        Ручной список: QG(half+1)..QG(total) — ВОЗРАСТАНИЕ (17..32 при 32 группах).
+        Жеребьёвка ручная идёт с последней SF-группы к первой:
+        - SF-группа №(half)   (QG half)  ← первые два игрока из списка (QG half+1)
+        - SF-группа №(half-1) (QG half-1)← следующие два (QG half+2)
+        - …
+        - SF-группа №1        (QG 1)     ← последние два (QG total)
+        Итог: пары (1↔32, 2↔31, …, 16↔17).
         """
         total_qual_groups = len(self.groups_data)      # 32
         half = total_qual_groups // 2                  # 16
-        num_sf_groups = half                           # 16 групп в каждом SF
+        num_sf_groups = half
 
-        # 1. Инициализация
         self.sf_groups = [
             [[None, None, None, None] for _ in range(num_sf_groups)]
             for _ in range(2)
@@ -1614,39 +1619,36 @@ class SemiFinalManual(QDialog):
 
         by_group = {g: players for g, players in self.groups_data}
 
-        # 2. Авто-заполнение — первая половина QG
+        # Авто — первая половина QG
         for qg in range(1, half + 1):
             sf_g = qg - 1
             pl = by_group.get(qg, [])
 
-            # SF1 → 1-е и 2-е места
             if len(pl) >= 1 and pl[0] is not None:
-                self.sf_groups[0][sf_g][0] = pl[0]
+                self.sf_groups[0][sf_g][0] = pl[0]   # SF1, 1-е место
             if len(pl) >= 2 and pl[1] is not None:
-                self.sf_groups[0][sf_g][1] = pl[1]
-
-            # SF2 → 3-е и 4-е места
+                self.sf_groups[0][sf_g][1] = pl[1]   # SF1, 2-е место
             if len(pl) >= 3 and pl[2] is not None:
-                self.sf_groups[1][sf_g][0] = pl[2]
+                self.sf_groups[1][sf_g][0] = pl[2]   # SF2, 3-е место
             if len(pl) >= 4 and pl[3] is not None:
-                self.sf_groups[1][sf_g][1] = pl[3]
+                self.sf_groups[1][sf_g][1] = pl[3]   # SF2, 4-е место
 
-        # 3. Ручной список — вторая половина QG, по убыванию (32..17)
+        # Ручной список: возрастание 17..32
         manual_sf0, manual_sf1 = [], []
-        for qg in range(total_qual_groups, half, -1):
+        for qg in range(half + 1, total_qual_groups + 1):
             pl = by_group.get(qg, [])
             if len(pl) >= 1 and pl[0] is not None:
-                manual_sf0.append((qg, pl[0]))   # 1-е место
+                manual_sf0.append((qg, pl[0]))
             if len(pl) >= 2 and pl[1] is not None:
-                manual_sf0.append((qg, pl[1]))   # 2-е место
+                manual_sf0.append((qg, pl[1]))
             if len(pl) >= 3 and pl[2] is not None:
-                manual_sf1.append((qg, pl[2]))   # 3-е место
+                manual_sf1.append((qg, pl[2]))
             if len(pl) >= 4 and pl[3] is not None:
-                manual_sf1.append((qg, pl[3]))   # 4-е место
+                manual_sf1.append((qg, pl[3]))
 
         self.available_players = [manual_sf0, manual_sf1]
         self.current_player_idx = 0
-   
+
     def initUI(self):
         self.setWindowTitle('Ручная жеребьёвка полуфиналов')
         self.resize(1300, 750)
@@ -1770,9 +1772,11 @@ class SemiFinalManual(QDialog):
         players = self.available_players[self.current_sf]
         if self.current_player_idx < len(players):
             qg, p = players[self.current_player_idx]
+            expected_sf_group = len(players) // 2 - self.current_player_idx // 2
             self.current_player_label.setText(
-                f"Следующий: {p[1]} (рейтинг {p[2]}, регион {p[3]}, из QG{qg}) "
-                f"— осталось {len(players) - self.current_player_idx}"
+                f"Следующий: {p[1]} (R {p[2]}, регион {p[3]}, из Гр.{qg}) "
+                f"— ожидается группа №{expected_sf_group} "
+                f"(осталось {len(players) - self.current_player_idx})"
             )
         else:
             self.current_player_label.setText("Все игроки распределены!")
@@ -1783,16 +1787,16 @@ class SemiFinalManual(QDialog):
             return
         players = self.available_players[self.current_sf] or []
         for i in range(self.current_player_idx, len(players)):
-            qg, data_player = players[i]
-            player = data_player['player']
+            qg, player = players[i]
             name = player[1] if len(player) > 1 else "—"
             rating = player[2] if len(player) > 2 else "—"
             region = player[3] if len(player) > 3 else "—"
             self.players_list.addItem(
                 f"{name} (R {rating}, регион {region}, из Гр.{qg})"
             )
-   
+ 
     def update_groups_tables(self):
+        
         for i in reversed(range(self.groups_layout.count())):
             w = self.groups_layout.itemAt(i).widget()
             if w:
@@ -1800,11 +1804,15 @@ class SemiFinalManual(QDialog):
 
         groups   = self.sf_groups[self.current_sf]
         total_qg = len(self.groups_data)
+        half     = total_qg // 2
         cols     = 4
 
-        for g_idx, group in enumerate(groups):
-            low_qg  = g_idx + 1
-            high_qg = total_qg - g_idx
+        # Обратный порядок отображения: SF-группа half, half-1, …, 1
+        ordered = list(enumerate(groups))[::-1]   # [(15, gr16), (14, gr15), …, (0, gr1)]
+
+        for pos, (g_idx, group) in enumerate(ordered):
+            low_qg  = g_idx + 1            # 1..16
+            high_qg = total_qg - g_idx     # 32..17
 
             frame = QFrame()
             frame.setFrameStyle(QFrame.Box)
@@ -1812,7 +1820,7 @@ class SemiFinalManual(QDialog):
             frame.setMinimumWidth(220 if not self.is_fullscreen else 300)
             frame_layout = QVBoxLayout(frame)
 
-            header = QLabel(f"Группа {g_idx + 1} (QG{low_qg} + QG{high_qg})")
+            header = QLabel(f"Группа {g_idx + 1} (Гр.{low_qg} + Гр.{high_qg})")
             header.setStyleSheet(
                 "font-weight: bold; background-color: #4CAF50; color: white; padding: 3px;"
             )
@@ -1830,8 +1838,10 @@ class SemiFinalManual(QDialog):
             table.setAlternatingRowColors(True)
             table.setEditTriggers(QTableWidget.NoEditTriggers)
             table.cellClicked.connect(self.on_cell_clicked)
-            table.setProperty("group_idx", g_idx)
+            table.setProperty("group_idx", g_idx)        # <-- реальный индекс!
             table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            table.setEditTriggers(QTableWidget.NoEditTriggers)
+            table.itemDoubleClicked.connect(self.on_item_double_clicked)
 
             for row in range(self.players_per_group):
                 num_item = QTableWidgetItem(str(row + 1))
@@ -1841,26 +1851,44 @@ class SemiFinalManual(QDialog):
 
                 athlete = group[row] if row < len(group) else None
                 if athlete:
-                    gamer = athlete['player']
-                    item = QTableWidgetItem(f"{gamer[1]} ({gamer[3]}) R:{gamer[2]}")
-                    item.setData(Qt.UserRole, gamer[0])
+                    item = QTableWidgetItem(f"{athlete[1]} ({athlete[3]}) R:{athlete[2]}")
+                    item.setData(Qt.UserRole, athlete[0])
                     table.setItem(row, 1, item)
                 else:
                     table.setItem(row, 1, QTableWidgetItem(""))
 
-            # Конфликт регионов 1↔3 (только позиции 0 и 2)
-            first = group[0] if len(group) > 0 else None
-            if first and len(group) > 2 and group[2] and group[2][3] == first[3]:
-                item = table.item(2, 1)
-                if item:
-                    item.setBackground(QBrush(QColor(255, 200, 200)))
-                header.setStyleSheet(
-                    "font-weight: bold; background-color: #f44336; color: white; padding: 3px;"
-                )
-                header.setToolTip(f"Конфликт региона «{first[3]}»: 1-е и 3-е места.")
+                frame_layout.addWidget(table)
+                row_pos = pos // cols
+                col_pos = pos % cols
+                self.groups_layout.addWidget(frame, row_pos, col_pos)
 
-            frame_layout.addWidget(table)
-            self.groups_layout.addWidget(frame, g_idx // cols, g_idx % cols)
+                # Регион игрока, которого сейчас сеем
+                pool = self.available_players[self.current_sf]
+                current_region = None
+                if self.current_player_idx < len(pool):
+                    entry = pool[self.current_player_idx][1]
+                    athlete = entry['player'] if isinstance(entry, dict) else entry
+                    if athlete:
+                        current_region = athlete[3]
+
+                # ... внутри цикла, после заполнения ячеек ...
+
+                # Подсветка «своего» региона ТОЛЬКО у 1-го места (позиция 0)
+                if current_region and group and group[0] and group[0][3] == current_region:
+                    item = table.item(0, 1)
+                    if item:
+                        item.setBackground(QBrush(QColor(255, 255, 150)))   # жёлтый
+
+                # Красная подсветка конфликта 1↔3 — как было (перекрывает жёлтую)
+                first = group[0] if len(group) > 0 else None
+                if first and len(group) > 2 and group[2] and group[2][3] == first[3]:
+                    item = table.item(2, 1)
+                    if item:
+                        item.setBackground(QBrush(QColor(255, 200, 200)))
+                    header.setStyleSheet(
+                        "font-weight: bold; background-color: #f44336; color: white; padding: 3px;"
+                    )
+                    header.setToolTip(f"Конфликт региона «{first[3]}»: 1-е и 3-е места.")
 
         for c in range(cols):
             self.groups_layout.setColumnStretch(c, 1)
@@ -1876,6 +1904,65 @@ class SemiFinalManual(QDialog):
                     self.place_player_to_cell(g_idx, row)
                     return
         QMessageBox.information(self, "Информация", "Нет свободных ячеек для размещения!")
+
+    def on_item_double_clicked(self, item):
+        """Снимает пару (3-е+4-е место) и возвращает обоих в available_players."""
+        if item.column() != 1:
+            return
+        table = item.tableWidget()
+        group_idx = table.property("group_idx")
+        if group_idx is None:
+            return
+
+        row = item.row()
+        if row < 2:
+            QMessageBox.information(
+                self, "Информация",
+                "1-е и 2-е места заполняются автоматически и не снимаются."
+            )
+            return
+
+        groups = self.sf_groups[self.current_sf]
+        if group_idx >= len(groups):
+            return
+        group = groups[group_idx]
+
+        # Собираем позиции 2 и 3 (3-е и 4-е места) — снимаем парой
+        positions = [2, 3]
+        removed = []
+        for pos in positions:
+            if len(group) > pos and group[pos] is not None:
+                removed.append((pos, group[pos]))
+
+        if not removed:
+            return
+
+        names = ", ".join(a[1] for _, a in removed)
+        reply = QMessageBox.question(
+            self, "Снять пару",
+            f"Убрать из группы {group_idx + 1} пару: {names}?\n\n"
+            f"Игроки вернутся в список доступных.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # Возвращаем игроков в available_players с их QG
+        for pos, athlete in removed:
+            qual_group = self._find_qual_group(athlete)
+            if qual_group is None:
+                continue
+            # Вставляем в правильное место списка (по QG), чтобы не нарушать порядок
+            self.available_players[self.current_sf].append((qual_group, athlete))
+            group[pos] = None
+
+        # Сортируем пул по QG (по возрастанию, как в prepare_data)
+        self.available_players[self.current_sf].sort(key=lambda x: x[0])
+
+        # Сбрасываем индекс, чтобы игрок снова оказался «следующим»
+        self.current_player_idx = 0
+
+        self.update_interface()
 
     def on_cell_clicked(self, row, col):
         """Обработка клика по ячейке таблицы группы (только для 3-й и 4-й позиций)."""
@@ -1910,7 +1997,10 @@ class SemiFinalManual(QDialog):
 
         # Берём следующего игрока
         qual_group, athlete = players[self.current_player_idx]
-
+        # athlete — это уже «внутренний» игрок; если он dict — распакуем
+        if isinstance(athlete, dict):
+            athlete = athlete['player']
+            
         # Проверяем конфликт региона с 1-м местом
         if self._region_conflict_at(group, row, athlete):
             reply = QMessageBox.question(self, 'Конфликт регионов',
@@ -1938,17 +2028,18 @@ class SemiFinalManual(QDialog):
                         partner = players_list[partner_idx]
                     break
 
-            if partner and (len(group) <= 3 or group[3] is None):
-                found = False
-                for idx, (q, p) in enumerate(self.available_players[self.current_sf]):
-                    if p[0] == partner[0] and q == qual_group:
-                        del self.available_players[self.current_sf][idx]
-                        if idx < self.current_player_idx:
-                            self.current_player_idx -= 1
-                        found = True
-                        break
-                if found:
-                    group[3] = partner
+            partner_id = self._pid(partner)
+            found = False
+            for idx, (q, p) in enumerate(self.available_players[self.current_sf]):
+                if self._pid(p) == partner_id and q == qual_group:
+                    del self.available_players[self.current_sf][idx]
+                    if idx < self.current_player_idx:
+                        self.current_player_idx -= 1
+                    found = True
+                    break
+
+            if found:
+                group[3] = partner
 
         # Обновляем интерфейс
         self.update_interface()
@@ -1957,17 +2048,25 @@ class SemiFinalManual(QDialog):
         if self.current_player_idx >= len(players):
             QMessageBox.information(self, "Завершено", "Все игроки распределены!")
 
-    def prev_semifinal(self):
-        if self.current_sf > 0:
-            self.current_sf -= 1
-            self.current_player_idx = 0
-            self.update_interface()
+    def _find_qual_group(self, athlete):
+        """Номер квалификационной группы, откуда пришёл игрок."""
+        aid = athlete[0]
+        for qg, players in self.groups_data:
+            for entry in players:
+                pl = entry['player'] if isinstance(entry, dict) else entry
+                if pl and pl[0] == aid:
+                    return qg
+        return None
 
-    def next_semifinal(self):
-        if self.current_sf < self.num_sf - 1:
-            self.current_sf += 1
-            self.current_player_idx = 0
-            self.update_interface()
+    def _pid(self, athlete):
+        """ID игрока в любом формате записи (list / tuple / dict)."""
+        if athlete is None:
+            return None
+        if isinstance(athlete, dict):
+            # {'place':…, 'player': […]}
+            pl = athlete.get('player')
+            return pl[0] if pl else None
+        return athlete[0]
 
     def reset_current_sf(self):
         """Сброс текущего полуфинала (очищает 3-и и 4-е места, возвращает игроков в список)."""
@@ -2042,16 +2141,24 @@ class SemiFinalManual(QDialog):
 
     def save_results(self):
         """Сохранение результатов в таблицы Choice, Game_list и Result."""
+        if self.current_sf == 0:
+            stage = "Квалификация. 1-й полуфинал"
+        else:
+            stage = "Квалификация. 2-й полуфинал"
+
+        sex = getattr(self, "current_sex", None) or "man"
+
         try:
             # Определяем систему для полуфинала
             system = System.get_or_none(
                 (System.title_id == self.title_id) &
-                (System.stage == "Квалификация. 1-й полуфинал")
+                (System.sex == sex) &
+                (System.stage == stage)
             )
             if not system:
                 system = System.create(
                     title_id=self.title_id,
-                    stage="Квалификация. 1-й полуфинал",
+                    stage=stage,
                     total_group=len(self.sf_groups[0]),
                     max_player=4,
                     type_table="Круговая",
@@ -2063,14 +2170,21 @@ class SemiFinalManual(QDialog):
                 (Game_list.title_id == self.title_id) &
                 (Game_list.system_id == system.id)
             ).execute()
-            Choice.update(
-                semi_final=None,
-                posev_sf=None,
-                sf_group=None
-            ).where(
-                (Choice.title_id == self.title_id) &
-                (Choice.system_id == system.id)
-            ).execute()
+            # ======
+            player_ids = [a[0] for groups in self.sf_groups for group in groups
+                        for a in group if a]
+            if player_ids:
+                Choice.update(
+                    semi_final=None, posev_sf=None, sf_group=None
+                ).where(Choice.player_choice_id.in_(player_ids)).execute()
+            # Choice.update(
+            #     semi_final=None,
+            #     posev_sf=None,
+            #     sf_group=None
+            # ).where(
+            #     (Choice.title_id == self.title_id) &
+            #     (Choice.system_id == system.id)
+            # ).execute()
 
             # Сохраняем данные по всем полуфиналам
             for sf_idx, groups in enumerate(self.sf_groups):
@@ -2116,11 +2230,30 @@ class SemiFinalManual(QDialog):
                             player1 = players_in_group[i]
                             player2 = players_in_group[j]
                             # Проверяем, нет ли уже такого матча в Result
+                            # existing = Result.get_or_none(
+                            #     (Result.title_id == self.title_id) &
+                            #     (Result.player1_id == player1[0]) &
+                            #     (Result.player2_id == player2[0]) &
+                            #     (Result.system_id == system.id)
+                            # )
+                            # if not existing:
+                            #     Result.create(
+                            #         title_id=self.title_id,
+                            #         system_id=system.id,
+                            #         player1_id=player1[0],
+                            #         player2_id=player2[0],
+                            #         player1_score=0,
+                            #         player2_score=0,
+                            #         winner_id=None,
+                            #         status="pending"
+                            #     )
                             existing = Result.get_or_none(
                                 (Result.title_id == self.title_id) &
-                                (Result.player1_id == player1[0]) &
-                                (Result.player2_id == player2[0]) &
-                                (Result.system_id == system.id)
+                                (Result.system_id == system.id) &
+                                (
+                                    ((Result.player1_id == player1[0]) & (Result.player2_id == player2[0])) |
+                                    ((Result.player1_id == player2[0]) & (Result.player2_id == player1[0]))
+                                )
                             )
                             if not existing:
                                 Result.create(
@@ -2131,11 +2264,12 @@ class SemiFinalManual(QDialog):
                                     player1_score=0,
                                     player2_score=0,
                                     winner_id=None,
-                                    status="pending"
-                                )
+                                    status="pending",
+                                    sex=sex,          # <-- если поле есть в модели
+    )
 
             # Устанавливаем флаг выбора
-            self.set_choice_flag_for_stage("Квалификация. 1-й полуфинал", flag=1)
+            self.set_choice_flag_for_stage(stage, flag=1)
 
             QMessageBox.information(self, "Успех",
                 f"Результаты сохранены!\n"
@@ -2177,20 +2311,22 @@ def choice_semifinal_manual(self, parent=None):
                 (Choice.group == f"{gr_num} группа")
             ).order_by(Choice.mesto_group)
             athletes_in_group = []
-
+#
             for ch in choices:
                 player = Player.get_or_none(Player.id == ch.player_choice_id)
                 if player:
-                    athletes_in_group.append({
-                        'place': ch.mesto_group,          # фактическое место в квалификации
-                        'player': [player.id, player.fio, player.rank,
-                                player.region, player.coach_id],
-                    })
+                    athletes_in_group.append(
+                        [player.id, player.fio, player.rank, player.region, player.coach_id]
+                    )
             groups_data.append((gr_num, athletes_in_group))
+
 
         # Получаем всех спортсменов турнира (для справки)
         all_athletes = []
-        for player in Player.select().where(Player.title_id == self.current_title_id):
+        for player in Player.select().where(
+            (Player.title_id == self.current_title_id) &
+              (Player.sex == self.current_sex)
+            ):
             all_athletes.append([player.id, player.fio, player.rank, player.region, player.coach_id])
 
         dialog = SemiFinalManual(all_athletes, groups_data, self.current_title_id, parent)
