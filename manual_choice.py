@@ -2142,120 +2142,6 @@ class SemiFinalManual(QDialog):
         if self.conflicts:
             QMessageBox.warning(self, "Конфликты", "\n".join(self.conflicts))
             self.conflicts = []
-# ============== old
-    # def save_results(self):
-    #     """Сохранение результатов в таблицы Choice, Game_list и Result."""
-    #     if self.current_sf == 0:
-    #         stage = "Квалификация. 1-й полуфинал"
-    #     else:
-    #         stage = "Квалификация. 2-й полуфинал"
-
-    #     sex = getattr(self, "current_sex", None) or "man"
-
-    #     try:
-    #         # Определяем систему для полуфинала
-    #         system = System.get_or_none(
-    #             (System.title_id == self.title_id) &
-    #             (System.sex == sex) &
-    #             (System.stage == stage)
-    #         )
-    #         if not system:
-    #             system = System.create(
-    #                 title_id=self.title_id,
-    #                 stage=stage,
-    #                 total_group=len(self.sf_groups[0]),
-    #                 max_player=4,
-    #                 type_table="Круговая",
-    #                 score_flag=5
-    #             )
-
-    #         # Очищаем старые записи для этого этапа
-    #         Game_list.delete().where(
-    #             (Game_list.title_id == self.title_id) &
-    #             (Game_list.system_id == system.id)
-    #         ).execute()
-    #         # ======
-    #         player_ids = [a[0] for groups in self.sf_groups for group in groups
-    #                     for a in group if a]
-    #         if player_ids:
-    #             Choice.update(
-    #                 semi_final=None, posev_sf=None, sf_group=None
-    #             ).where(Choice.player_choice_id.in_(player_ids)).execute()
-
-    #         # Сохраняем данные по всем полуфиналам
-    #         for sf_idx, groups in enumerate(self.sf_groups):
-    #             sf_num = sf_idx + 1
-    #             for g_idx, group in enumerate(groups):
-    #                 gr_num = g_idx + 1
-    #                 for pos, athlete in enumerate(group, start=1):
-    #                     if athlete:
-    #                         # Обновляем Choice
-    #                         choice = Choice.get_or_none(
-    #                             (Choice.title_id == self.title_id) &
-    #                             (Choice.player_choice_id == athlete[0])
-    #                         )
-    #                         if choice:
-    #                             choice.semi_final = sf_num
-    #                             choice.posev_sf = pos
-    #                             choice.sf_group = f"{gr_num} группа"
-    #                             choice.save()
-
-    #                         # Создаём запись в Game_list
-    #                         Game_list.create(
-    #                             number_group=f"{gr_num} группа",
-    #                             rank_num_player=pos,
-    #                             player_group=athlete[0],
-    #                             system_id=system.id,
-    #                             title_id=self.title_id,
-    #                             player_double_id=None,
-    #                             team_id=None,
-    #                             sex="man"
-    #                         )
-
-    #         # Создаём записи в Result (сыгранные матчи внутри каждой группы полуфинала)
-    #         # Для каждой группы полуфинала создаём матчи между всеми игроками (круговая система)
-    #         for sf_idx, groups in enumerate(self.sf_groups):
-    #             sf_num = sf_idx + 1
-    #             for g_idx, group in enumerate(groups):
-    #                 players_in_group = [p for p in group if p is not None]
-    #                 if len(players_in_group) < 2:
-    #                     continue
-    #                 # Все пары
-    #                 for i in range(len(players_in_group)):
-    #                     for j in range(i + 1, len(players_in_group)):
-    #                         player1 = players_in_group[i]
-    #                         player2 = players_in_group[j]
-                           
-    #                         existing = Result.get_or_none(
-    #                             (Result.title_id == self.title_id) &
-    #                             (Result.system_id == system.id) &
-    #                             (
-    #                                 ((Result.player1 == player1[1]) & (Result.player2 == player2[1])) |
-    #                                 ((Result.player1 == player2[1]) & (Result.player2 == player1[1]))
-    #                             )
-    #                         )
-    #                         if not existing:
-    #                             Result.create(
-    #                                 title_id=self.title_id,
-    #                                 system_id=system.id,
-    #                                 player1=player1[1],
-    #                                 player2=player2[1],
-    #                                 player1_score=0,
-    #                                 player2_score=0,
-    #                                 winner_id=None,
-    #                                 status="pending",
-    #                                 sex=sex,          # <-- если поле есть в модели
-    # )
-
-    #         # Устанавливаем флаг выбора
-    #         self.set_choice_flag_for_stage(stage, flag=1)
-
-    #         QMessageBox.information(self, "Успех",
-    #             f"Результаты сохранены!\n"
-    #             f"Создано {Game_list.select().where(Game_list.system_id == system.id).count()} записей в Game_list.\n"
-    #             f"Создано {Result.select().where(Result.system_id == system.id).count()} матчей в Result.")
-    #     except Exception as e:
-    #         QMessageBox.warning(self, "Ошибка", f"Ошибка сохранения: {str(e)}")
 
     def save_results(self):
         """Сохранение результатов ручной жеребьёвки полуфиналов.
@@ -2383,11 +2269,16 @@ class SemiFinalManual(QDialog):
         except Exception as e:
             print(f"Ошибка установки флага: {e}")
 # ========== ФУНКЦИИ ВЫЗОВА ==========
-def choice_semifinal_manual(self, parent=None):
+def choice_semifinal_manual(self, stage, parent=None):
     """
     Запускает ручную жеребьёвку полуфиналов.
     Собирает данные из квалификационных групп и открывает диалог.
     """
+    if stage == "Квалификация. 1-й полуфинал":
+        place_list = [1, 2]
+    else:
+        place_list = [3, 4]
+
     try:
         # Получаем систему квалификации
         system = System.get(
@@ -2401,10 +2292,11 @@ def choice_semifinal_manual(self, parent=None):
             choices = Choice.select().where(
                 (Choice.title_id == self.current_title_id) &
                 (Choice.sex == self.current_sex) &
-                (Choice.group == f"{gr_num} группа")
-            ).order_by(Choice.mesto_group)
+                (Choice.group == f"{gr_num} группа") &
+                (Choice.mesto_group.in_(place_list))
+            ).order_by(Choice.group, Choice.mesto_group)
             athletes_in_group = []
-#
+
             for ch in choices:
                 player = Player.get_or_none(Player.id == ch.player_choice_id)
                 if player:
@@ -2422,7 +2314,6 @@ def choice_semifinal_manual(self, parent=None):
             ):
             all_athletes.append([player.id, player.fio, player.rank, player.region, player.coach_id])
 
-        # dialog = SemiFinalManual(all_athletes, groups_data, self.current_title_id, parent)
         dialog = SemiFinalManual(all_athletes, groups_data, self.current_title_id, parent,
             current_sex=self.current_sex, main_window=self
             )

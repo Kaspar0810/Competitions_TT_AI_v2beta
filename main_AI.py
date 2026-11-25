@@ -18354,18 +18354,15 @@ class MainWindow(QMainWindow):
         #========================
         if stage == "Квалификация":
             manual_choice.choice_group_manual(self, athletes, num_groups, stage, parent=None)
-        elif stage == "Квалификация. 1-й полуфинал":
+        elif stage == "Квалификация. 1-й полуфинал" or stage == "Квалификация. 2-й полуфинал":
             # Вызываем функцию выбора жеребьевки полуфиналов
-            manual_choice.choice_semifinal_manual(self)
+            manual_choice.choice_semifinal_manual(self, stage)
         else:
             if type_table == "Круговая":
                 pass
                 # manual_choice.choice_group_manual(self, athletes, num_groups, stage, parent=None)
             else:
                 self.open_manual_net_draw(stage)
-
-        # if num_id_player is not None:  
-        #     self.save_manual_drawing_for_stage(num_id_player, stage)
 
     def fill_choice_table_for_stage(self, stage):
         """Заполнение таблицы Choice для конкретного этапа"""
