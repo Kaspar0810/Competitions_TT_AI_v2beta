@@ -1577,10 +1577,11 @@ class SemiFinalManual(QDialog):
     от второй половины групп к первой.
     """
     def __init__(self, athletes, groups_data, title_id=None, parent=None,
-            current_sex=None):          # <-- NEW параметр
+            current_sex=None, main_window=None):          # <-- NEW параметр
         super().__init__(parent)
         self.athletes = athletes
         self.groups_data = groups_data
+        self.main_window = main_window 
         self.title_id = title_id
         self.current_title_id = title_id                                    # NEW
         self.current_sex = current_sex or getattr(parent, 'current_sex', None) or "man"  # NEW
@@ -2354,7 +2355,7 @@ class SemiFinalManual(QDialog):
                     })
 
                 # --- 4. Result-матчи с переносом из квалификации ---
-                self.create_matches_for_semi_final(sf_num, sf_groups_for_matches, stage)
+                self.main_window.create_matches_for_semi_final(sf_num, sf_groups_for_matches, stage)
 
                 # --- 5. Флаг ---
                 self.set_choice_flag_for_stage(stage, flag=1)
@@ -2423,7 +2424,7 @@ def choice_semifinal_manual(self, parent=None):
 
         # dialog = SemiFinalManual(all_athletes, groups_data, self.current_title_id, parent)
         dialog = SemiFinalManual(all_athletes, groups_data, self.current_title_id, parent,
-            current_sex=self.current_sex
+            current_sex=self.current_sex, main_window=self
             )
         return dialog.exec_() == QDialog.Accepted
     except Exception as e:
