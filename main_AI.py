@@ -21086,6 +21086,20 @@ class MainWindow(QMainWindow):
             elif table in ("setka_8", "setka_8_full", "setka_8_2"):
                 semifinal_matches = [5, 6] 
     # ---------- 0. Заполняем нулевой столбец игроками первого посева ----------
+            # ---------- 0. Заполняем нулевой столбец игроками первого посева ----------
+        def _split_fio_city(name_city):
+            """
+            'ИВАНОВ Иван Иванович/Москва' → 'ИВАНОВ Иван Иванович\\nМосква'
+            Если '/' нет — просто ФИО.
+            """
+            if not name_city:
+                return ""
+            s = str(name_city).strip()
+            if "/" in s:
+                fio, city = s.split("/", 1)
+                return f"{fio.strip()}\n{city.strip()}"
+            return s
+
         ind = 0
         for row in data:
             if not row:
@@ -21094,15 +21108,28 @@ class MainWindow(QMainWindow):
             if pos != "":
                 if int(pos) in posev_data:
                     info = posev_data[int(pos)]
-                    if stage in pairs_list:
-                        fio_city =  info.get("name_city")
-                        fio_city = fio_city.replace("/", "\n")
-                        data[ind][1] = fio_city                 
-                    else:    
-                        data[ind][1] = info.get("name_city")
+                    name_city = info.get("name_city") or ""
+                    data[ind][1] = _split_fio_city(name_city)
                     ind += 1
             else:
                 ind += 1
+        # ind = 0
+        # for row in data:
+        #     if not row:
+        #         continue
+        #     pos = row[0]
+        #     if pos != "":
+        #         if int(pos) in posev_data:
+        #             info = posev_data[int(pos)]
+        #             if stage in pairs_list:
+        #                 fio_city =  info.get("name_city")
+        #                 fio_city = fio_city.replace("/", "\n")
+        #                 data[ind][1] = fio_city                 
+        #             else:    
+        #                 data[ind][1] = info.get("name_city")
+        #             ind += 1
+        #     else:
+        #         ind += 1
         # ---------- 1. Загружаем результаты ----------
         query = Result.select().where((Result.title_id == self.current_title_id) & (Result.sex == self.current_sex)) 
         if stage is not None:
@@ -21995,14 +22022,16 @@ class MainWindow(QMainWindow):
                 ts.append(b)
             t.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
                                 ('FONTNAME', (0, 0), (-1, -1), "DejaVuSerif"),
-                                ('FONTSIZE', (0, 0), (-1, -1), 5),
-                                ('FONTNAME', (1, 0), (1, 64), "DejaVuSerif-Bold"),
-                                ('FONTSIZE', (1, 0), (1, 64), 5),
-                                ('LEADING', (1, 0), (1, 64), 5), # МЕЖСТРОЧНЫЙ ИНТЕРВАЛ В ЯЧЕЙКЕ (размер 7 = размеру шрифта значит без зазора) 
+                                ('FONTSIZE', (0, 0), (-1, -1), 6),
+                                # ('FONTNAME', (1, 0), (1, 64), "DejaVuSerif-Bold"),
+                                # ('FONTSIZE', (1, 0), (1, 64), 7),
+                                ('LEADING', (1, 0), (1, 64), 6), # МЕЖСТРОЧНЫЙ ИНТЕРВАЛ В ЯЧЕЙКЕ (размер 7 = размеру шрифта значит без зазора) 
                                 # цвет шрифта игроков 1 ого тура
                                 ('TEXTCOLOR', (0, 0), (0, 68), colors.blue),
                                 ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-                                ('VALIGN', (1, 0), (1, 64), 'BOTTOM')] + ts))
+                                ('VALIGN', (1, 0), (1, 64), 'BOTTOM'),
+                                ('FONTNAME', (1, 0), (1, 64), "DejaVuSerif-Bold"),
+                                ('FONTSIZE', (1, 0), (1, 64), 6),] + ts))
                                 
         # === надпись финала
             h2 = PS("normal", fontSize=10, fontName="DejaVuSerif-Italic",
