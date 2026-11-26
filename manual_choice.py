@@ -136,7 +136,7 @@ class ChoiceGroupManual(QDialog):
             self.toggle_fullscreen()
         else:
             self.reject()
-# =========       
+# ========= 
     def load_existing_draw(self):
         """Загрузка существующей жеребьевки из базы данных"""
         # Инициализируем группы
@@ -368,7 +368,7 @@ class ChoiceGroupManual(QDialog):
         
         self.btn_ok = QPushButton("Записать жеребьевку")
         self.btn_ok.setFixedHeight(28)
-        self.btn_ok.clicked.connect(self.accept)
+        self.btn_ok.clicked.connect(self.on_save_clicked)
         self.btn_ok.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
         dialog_buttons.addWidget(self.btn_ok)
         
@@ -424,7 +424,12 @@ class ChoiceGroupManual(QDialog):
         content_layout.addWidget(center_panel, stretch=1)
         
         main_layout.addLayout(content_layout)
- # ======================================================       
+ # ======================================================  
+    def on_save_clicked(self):
+        """Сохранение в БД и закрытие диалога только при успехе."""
+        if self.save_to_database():
+            self.accept()
+
     def get_group_players_count(self, group_idx):
         """Получить количество игроков в группе"""
         if group_idx < len(self.groups):
@@ -1434,24 +1439,82 @@ class ChoiceGroupManual(QDialog):
         return results
 # ==== вариант восстановления сохранения ===
     def save_to_database(self):
-            """Сохранение результатов жеребьевки в базу данных через Peewee"""
-            try:
-                Choice.delete().execute()
-                
-                for group_idx, group in enumerate(self.groups):
-                    for posev_group, athlete in enumerate(group, 1):
-                        if athlete:
-                            Choice.create(
-                                id_player_choice=athlete[0],
-                                group=group_idx + 1,
-                                posev_group=posev_group
-                            )
-                
-                QMessageBox.information(self, "Успех", "Результаты жеребьевки успешно сохранены в базу данных!")
-                
-            except Exception as e:
-                QMessageBox.warning(self, "Ошибка", f"Ошибка при сохранении в базу данных:\n{str(e)}")
-# ========
+        """Сохраняет результаты жеребьёвки в Choice (по текущему title_id/sex/stage).
+        Возвращает True при успехе."""
+        try:
+            # System для квалификации (по текущему турниру/полу/этапу)
+            stage = "Квалификация"
+            system = System.get_or_none(
+                (System.title_id == self.title_id) &
+                (System.sex == self.sex) &
+                (System.stage == stage)
+            )
+            if not system:
+                system = System.create(
+                    title_id=self.title_id,
+                    sex=self.sex,
+                    stage=stage,
+                    total_group=self.num_groups,
+                    max_player=self.max_rows_per_group,
+                    type_table="Круговая",
+                    score_flag=5,
+                )
+            else:
+                # обновим параметры на случай смены количества групп
+                system.total_group = self.num_groups
+                system.max_player = self.max_rows_per_group
+                if not getattr(system, "sex", None):
+                    system.sex = self.sex
+                system.save()
+
+            # Сбрасываем только записи этого турнира/пола
+            Choice.update(
+                group=None, posev_group=None
+            ).where(
+                (Choice.title_id == self.title_id) &
+                (Choice.sex == self.sex)
+            ).execute()
+
+            # Записываем позиции
+            for group_idx, group in enumerate(self.groups):
+                gr_num = group_idx + 1
+                for posev_group, athlete in enumerate(group, 1):
+                    if not athlete:
+                        continue
+
+                    choice = Choice.get_or_none(
+                        (Choice.title_id == self.title_id) &
+                        (Choice.sex == self.sex) &
+                        (Choice.player_choice_id == athlete[0])
+                    )
+                    if not choice:
+                        # На всякий случай: если игрока нет в Choice — создаём
+                        choice = Choice.create(
+                            title_id=self.title_id,
+                            sex=self.sex,
+                            player_choice_id=athlete[0],
+                            system_id=system.id,
+                        )
+                    choice.group = f"{gr_num} группа"
+                    choice.posev_group = posev_group
+                    choice.system_id = system.id
+                    choice.save()
+
+            # Флаг выбора
+            system.choice_flag = True
+            system.save()
+
+            QMessageBox.information(
+                self, "Успех",
+                f"Результаты сохранены.\n"
+                f"Распределено спортсменов: "
+                f"{sum(1 for g in self.groups for a in g if a)}"
+            )
+            return True
+
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка", f"Ошибка сохранения:\n{str(e)}")
+            return False
 # ======== new
     def toggle_fullscreen(self):
         """Переключение между полноэкранным и обычным режимом."""
@@ -1481,93 +1544,192 @@ class ChoiceGroupManual(QDialog):
         except Exception as e:
             print(f"[toggle_fullscreen] refresh failed: {e}")
 # ===========
-def load_existing_draw_from_db(id_title, current_sex):
-    """Загрузка существующей жеребьевки из базы данных через Peewee"""
-    choices = Choice.select().where((Choice.title_id == id_title) & (Choice.sex == current_sex))
-    try:
-        results = choices.select().order_by(Choice.group, Choice.posev_group)
-        return list(results) if results.exists() else None
-    except Exception as e:
-        print(f"Ошибка при загрузке из базы данных: {e}")
+# def load_existing_draw_from_db(id_title, current_sex):
+#     """Загрузка существующей жеребьевки из базы данных через Peewee"""
+#     choices = Choice.select().where((Choice.title_id == id_title) & (Choice.sex == current_sex))
+#     try:
+#         results = choices.select().order_by(Choice.group, Choice.posev_group)
+#         return list(results) if results.exists() else None
+#     except Exception as e:
+#         print(f"Ошибка при загрузке из базы данных: {e}")
+#         return None
+
+def load_existing_draw_from_db(id_title, current_sex, stage="Квалификация"):
+    system = System.get_or_none(
+        (System.title_id == id_title) &
+        (System.sex == current_sex) &
+        (System.stage == stage)
+    )
+    if not system:
         return None
+    q = (Choice.select()
+         .where((Choice.title_id == id_title) &
+                (Choice.sex == current_sex) &
+                (Choice.system_id == system.id) &
+                (Choice.group.is_null(False)) &
+                (Choice.posev_group.is_null(False)))
+         .order_by(Choice.group, Choice.posev_group))
+    return list(q) if q.exists() else None
 
-def clear_db_before_choice(self, stage):
-    """очищает базу данных -Game_list- и -Result- перед повторной жеребьевкой групп"""
+# def clear_db_before_choice(self, stage):
+#     """очищает базу данных -Game_list- и -Result- перед повторной жеребьевкой групп"""
 
-    systems = System.select().where((System.stage == stage) & (System.title_id == self)).get()
-    id_system = systems.id
+#     systems = System.select().where((System.stage == stage) & (System.title_id == self)).get()
+#     id_system = systems.id
 
-    gamelist = Game_list.select().where((Game_list.title_id == self) & (Game_list.system_id == id_system))
-    for i in gamelist:
-        gl_d = Game_list.get(Game_list.id == i)
-        gl_d.delete_instance()
-    results = Result.select().where((Result.title_id == self) & (Result.system_id == id_system))
-    for i in results:
-        r_d = Result.get(Result.id == i)
-        r_d.delete_instance()
-    choice = Choice.select().where(Choice.title_id == self)
-    for i in choice:
-        if stage == "Квалификация":
-            Choice.update(group = None, posev_group=None).where(Choice.id == i).execute()
-        else:
-            Choice.update(final = None, posev_final=None).where(Choice.id == i).execute()
+#     gamelist = Game_list.select().where((Game_list.title_id == self) & (Game_list.system_id == id_system))
+#     for i in gamelist:
+#         gl_d = Game_list.get(Game_list.id == i)
+#         gl_d.delete_instance()
+#     results = Result.select().where((Result.title_id == self) & (Result.system_id == id_system))
+#     for i in results:
+#         r_d = Result.get(Result.id == i)
+#         r_d.delete_instance()
+#     choice = Choice.select().where(Choice.title_id == self)
+#     for i in choice:
+#         if stage == "Квалификация":
+#             Choice.update(group = None, posev_group=None).where(Choice.id == i).execute()
+#         else:
+#             Choice.update(final = None, posev_final=None).where(Choice.id == i).execute()
+
+def clear_db_before_choice(title_id, sex, stage="Квалификация"):
+    system = System.get_or_none(
+        (System.stage == stage) &
+        (System.title_id == title_id) &
+        (System.sex == sex)
+    )
+    if not system:
+        return
+    Game_list.delete().where(
+        (Game_list.title_id == title_id) &
+        (Game_list.system_id == system.id)
+    ).execute()
+    Result.delete().where(
+        (Result.title_id == title_id) &
+        (Result.system_id == system.id)
+    ).execute()
+    Choice.update(group=None, posev_group=None).where(
+        (Choice.title_id == title_id) &
+        (Choice.sex == sex)
+    ).execute()
+    system.choice_flag = False
+    system.save()
+
+
+
+# def choice_group_manual(self, athletes, num_groups, stage, parent=None):
+#     """
+#     Функция для вызова ручной жеребьевки
+    
+#     Args:
+#         athletes: список списков [id игрока, фамилия_имя, рейтинг, регион, тренер]
+#         num_groups: количество групп (от 2 до 32)
+#         parent: родительское окно
+    
+#     Returns:
+#         list: список результатов или None если отмена
+#     """
+
+#     existing_data = None
+#     if num_groups == 1:
+#         system = System.select().where((System.title_id == self.current_title_id) and (System.stage == stage)).get()  # находит system id последнего
+
+#     elif num_groups > 1 or num_groups <= 48:
+#     #     raise ValueError("Количество групп должно быть от 2 до 32")
+#         system = System.select().where((System.title_id == self.current_title_id) and (System.stage == stage)).get()  # находит system id последнего
+
+#     check_flag = system.choice_flag
+
+#     if check_flag is True:
+#         # Проверяем, есть ли уже жеребьевка в базе данных
+#         existing_data = load_existing_draw_from_db(self.current_title_id, self.current_sex)
+    
+#     if existing_data:
+#         # Создаем диалог выбора действия
+#         action_dialog = ChoiceActionDialog(parent)
+#         result = action_dialog.exec_()
+        
+#         if result == 1:  # Сбросить
+#             # Очищаем таблицу в БД
+#             clear_db_before_choice(self.current_title_id, stage)
+#             try:
+#                 existing_data = None
+#                 QMessageBox.information(parent, "Информация", 
+#                     "Начинаем новую жеребьевку. Предыдущие данные удалены.")
+#             except Exception as e:
+#                 QMessageBox.warning(parent, "Ошибка", f"Ошибка при очистке БД: {str(e)}")
+#                 return None
+#         elif result == 2:  # Загрузить
+#             # Загружаем существующую жеребьевку
+#             pass
+#         else:  # Отмена
+#             return None
+    
+#     dialog = ChoiceGroupManual(
+#             athletes, num_groups,
+#             self.current_title_id,
+#             self.current_sex,
+#             parent=parent,
+#             existing_data=existing_data,
+#         )
+#     result_code = dialog.exec_()
+    
+#     if result_code == QDialog.Accepted:
+#         return dialog.get_results()
+  
+#     else:
+#         return None
 
 def choice_group_manual(self, athletes, num_groups, stage, parent=None):
-    """
-    Функция для вызова ручной жеребьевки
-    
-    Args:
-        athletes: список списков [id игрока, фамилия_имя, рейтинг, регион, тренер]
-        num_groups: количество групп (от 2 до 32)
-        parent: родительское окно
-    
-    Returns:
-        list: список результатов или None если отмена
-    """
-
     existing_data = None
-    if num_groups == 1:
-        system = System.select().where((System.title_id == self.current_title_id) and (System.stage == stage)).get()  # находит system id последнего
+    system = System.get_or_none(
+        (System.title_id == self.current_title_id) &
+        (System.sex == self.current_sex) &
+        (System.stage == stage)
+    )
+    if system is None:
+        # создадим систему квалификации, если её ещё нет
+        system = System.create(
+            title_id=self.current_title_id,
+            sex=self.current_sex,
+            stage=stage,
+            total_group=num_groups,
+            max_player=(len(athletes) + num_groups - 1) // num_groups,
+            type_table="Круговая",
+            score_flag=5,
+        )
 
-    elif num_groups > 1 or num_groups <= 48:
-    #     raise ValueError("Количество групп должно быть от 2 до 32")
-        system = System.select().where((System.title_id == self.current_title_id) and (System.stage == stage)).get()  # находит system id последнего
+    if system.choice_flag:
+        existing_data = load_existing_draw_from_db(
+            self.current_title_id, self.current_sex, stage
+        )
 
-    check_flag = system.choice_flag
-
-    if check_flag is True:
-        # Проверяем, есть ли уже жеребьевка в базе данных
-        existing_data = load_existing_draw_from_db(self.current_title_id, self.current_sex)
-    
     if existing_data:
-        # Создаем диалог выбора действия
         action_dialog = ChoiceActionDialog(parent)
         result = action_dialog.exec_()
-        
-        if result == 1:  # Сбросить
-            # Очищаем таблицу в БД
-            clear_db_before_choice(self.current_title_id, stage)
-            try:
-                existing_data = None
-                QMessageBox.information(parent, "Информация", 
-                    "Начинаем новую жеребьевку. Предыдущие данные удалены.")
-            except Exception as e:
-                QMessageBox.warning(parent, "Ошибка", f"Ошибка при очистке БД: {str(e)}")
-                return None
-        elif result == 2:  # Загрузить
-            # Загружаем существующую жеребьевку
+        if result == 1:       # Сбросить
+            clear_db_before_choice(self.current_title_id, self.current_sex, stage)
+            existing_data = None
+            QMessageBox.information(
+                parent, "Информация",
+                "Начинаем новую жеребьевку. Предыдущие данные удалены."
+            )
+        elif result == 2:     # Загрузить
             pass
-        else:  # Отмена
+        else:
             return None
-    
-    dialog = ChoiceGroupManual(athletes, num_groups, self.current_title_id, parent, existing_data)
-    result_code = dialog.exec_()
-    
-    if result_code == QDialog.Accepted:
+
+    dialog = ChoiceGroupManual(
+        athletes, num_groups,
+        self.current_title_id,
+        self.current_sex,
+        parent=parent,
+        existing_data=existing_data,
+    )
+    if dialog.exec_() == QDialog.Accepted:
         return dialog.get_results()
-  
-    else:
-        return None
+    return None
+
 # ========== РУЧНАЯ ЖЕРЕБЬЁВКА ПОЛУФИНАЛОВ (ОБНОВЛЁННАЯ) ==========
 class SemiFinalManual(QDialog):
     """
