@@ -1576,9 +1576,12 @@ class SemiFinalManual(QDialog):
     3-и и 4-е места распределяются вручную из списка, отсортированного
     от второй половины групп к первой.
     """
+    import time
+
     def __init__(self, athletes, groups_data, title_id=None, parent=None,
             current_sex=None, main_window=None):          # <-- NEW параметр
         super().__init__(parent)
+        self._last_placed = None    # (g_idx, row, timestamp)
         self.athletes = athletes
         self.groups_data = groups_data
         self.main_window = main_window 
@@ -1652,6 +1655,10 @@ class SemiFinalManual(QDialog):
 
         self.available_players = [manual_sf0, manual_sf1]
         self.current_player_idx = 0
+
+        # убрать всех, кто уже стоит в авто-позициях 1-2
+        for sf in (0, 1):
+            self._clean_pool(sf)
 
     def initUI(self):
         self.setWindowTitle('Ручная жеребьёвка полуфиналов')
@@ -1735,7 +1742,8 @@ class SemiFinalManual(QDialog):
         self.setModal(True)
 
     def on_sf_changed(self, idx):
-        """Переключение полуфинала через комбобокс."""
+        if not self.sf_combo.signalsBlocked() and idx == self.current_sf:
+            return   # программный setCurrentIndex — ничего не делаем
         self.current_sf = idx
         self.current_player_idx = 0
         self.update_interface()
@@ -1769,6 +1777,9 @@ class SemiFinalManual(QDialog):
         return bool(first and athlete and first[3] == athlete[3])
 
     def update_interface(self):
+        self.sf_combo.blockSignals(True)
+        self.sf_combo.setCurrentIndex(self.current_sf)
+        self.sf_combo.blockSignals(False)
         self.update_players_list()
         self.update_groups_tables()
         self.current_sf_label.setText(f"Полуфинал: {self.current_sf + 1}")
@@ -1790,15 +1801,22 @@ class SemiFinalManual(QDialog):
         if not self.available_players:
             return
         players = self.available_players[self.current_sf] or []
+
         for i in range(self.current_player_idx, len(players)):
-            qg, player = players[i]
-            name = player[1] if len(player) > 1 else "—"
-            rating = player[2] if len(player) > 2 else "—"
-            region = player[3] if len(player) > 3 else "—"
-            self.players_list.addItem(
-                f"{name} (R {rating}, регион {region}, из Гр.{qg})"
-            )
- 
+            entry = players[i]
+            qg, athlete = entry if isinstance(entry, (tuple, list)) and len(entry) == 2 else ("?", entry)
+            if isinstance(athlete, dict):
+                athlete = athlete.get("player")
+            if not athlete or len(athlete) < 4:
+                self.players_list.addItem(f"!! {entry!r}")
+                continue
+
+            name   = athlete[1] or "—"
+            region = athlete[3] or "—"
+            sf_grp = self._find_sf_group(athlete)
+            sf_part = f"SF{sf_grp}, " if sf_grp else ""
+            self.players_list.addItem(f"{sf_part}гр. {qg}, {name}, {region}")
+    
     def update_groups_tables(self):
         
         for i in reversed(range(self.groups_layout.count())):
@@ -1840,11 +1858,11 @@ class SemiFinalManual(QDialog):
             table.setRowCount(self.players_per_group)
             table.verticalHeader().setVisible(False)
             table.setAlternatingRowColors(True)
-            table.setEditTriggers(QTableWidget.NoEditTriggers)
-            table.cellClicked.connect(self.on_cell_clicked)
             table.setProperty("group_idx", g_idx)        # <-- реальный индекс!
             table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            # update_groups_tables:
             table.setEditTriggers(QTableWidget.NoEditTriggers)
+            table.cellClicked.connect(self.on_cell_clicked)
             table.itemDoubleClicked.connect(self.on_item_double_clicked)
 
             for row in range(self.players_per_group):
@@ -1910,15 +1928,19 @@ class SemiFinalManual(QDialog):
         QMessageBox.information(self, "Информация", "Нет свободных ячеек для размещения!")
 
     def on_item_double_clicked(self, item):
-        """Снимает пару (3-е+4-е место) и возвращает обоих в available_players."""
         if item.column() != 1:
             return
+
         table = item.tableWidget()
-        group_idx = table.property("group_idx")
-        if group_idx is None:
+        g_idx = table.property("group_idx")
+        if g_idx is None:
+            return
+        row = item.row()
+
+        lp = self._last_placed
+        if lp and lp[0] == g_idx and lp[1] == row and (time.time() - lp[2]) < 0.5:
             return
 
-        row = item.row()
         if row < 2:
             QMessageBox.information(
                 self, "Информация",
@@ -1927,130 +1949,160 @@ class SemiFinalManual(QDialog):
             return
 
         groups = self.sf_groups[self.current_sf]
-        if group_idx >= len(groups):
+        if g_idx >= len(groups):
             return
-        group = groups[group_idx]
+        group = groups[g_idx]
 
-        # Собираем позиции 2 и 3 (3-е и 4-е места) — снимаем парой
-        positions = [2, 3]
-        removed = []
-        for pos in positions:
-            if len(group) > pos and group[pos] is not None:
-                removed.append((pos, group[pos]))
-
-        if not removed:
+        pair = [(pos, group[pos]) for pos in (2, 3)
+                if len(group) > pos and group[pos] is not None]
+        if not pair:
             return
 
-        names = ", ".join(a[1] for _, a in removed)
-        reply = QMessageBox.question(
+        names = ", ".join(a[1] for _, a in pair)
+        if QMessageBox.question(
             self, "Снять пару",
-            f"Убрать из группы {group_idx + 1} пару: {names}?\n\n"
+            f"Убрать из группы {g_idx + 1} пару: {names}?\n\n"
             f"Игроки вернутся в список доступных.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
-        )
-        if reply != QMessageBox.Yes:
+        ) != QMessageBox.Yes:
             return
 
-        # Возвращаем игроков в available_players с их QG
-        for pos, athlete in removed:
-            qual_group = self._find_qual_group(athlete)
-            if qual_group is None:
-                continue
-            # Вставляем в правильное место списка (по QG), чтобы не нарушать порядок
-            self.available_players[self.current_sf].append((qual_group, athlete))
+        to_pool = []
+        for pos, athlete in pair:
+            qg = self._find_qual_group(athlete)
             group[pos] = None
+            if qg is not None:
+                to_pool.append((qg, athlete))
 
-        # Сортируем пул по QG (по возрастанию, как в prepare_data)
-        self.available_players[self.current_sf].sort(key=lambda x: x[0])
+        self._return_to_pool(self.current_sf, to_pool)
+        self._clean_pool(self.current_sf)   # страховка: убрать случайные дубли/уже размещённых
 
-        # Сбрасываем индекс, чтобы игрок снова оказался «следующим»
         self.current_player_idx = 0
-
+        self._last_placed = None
         self.update_interface()
-
+    
     def on_cell_clicked(self, row, col):
-        """Обработка клика по ячейке таблицы группы (только для 3-й и 4-й позиций)."""
         if col != 1:
             return
-        if row < 2:  # 1-я и 2-я позиции заблокированы
-            QMessageBox.warning(self, "Ошибка", "1-е и 2-е места заполняются автоматически!")
-            return
+
         table = self.sender()
         if not table:
             return
-        group_idx = table.property("group_idx")
-        if group_idx is None:
+        g_idx = table.property("group_idx")
+        if g_idx is None:
             return
 
-        self.place_player_to_cell(group_idx, row)
+        if row < 2:
+            QMessageBox.warning(self, "Ошибка",
+                                "1-е и 2-е места заполняются автоматически!")
+            return
+        if row == 3:
+            # 4-е место заполняется автоматически партнёром
+            if len(groups[g_idx]) > 2 and groups[g_idx][2] is not None:
+                QMessageBox.information(
+                    self, "Информация",
+                    "4-е место заполняется автоматически парой к 3-му.\n"
+                    "Чтобы поставить сюда другого игрока, сначала снимите пару "
+                    "двойным кликом."
+                )
+                return
+        # ГЛАВНОЕ: занятая ячейка — молча выходим.
+        groups = self.sf_groups[self.current_sf]
+        if (g_idx < len(groups)
+                and row < len(groups[g_idx])
+                and groups[g_idx][row] is not None):
+            return   # <-- снятие делает on_item_double_clicked
+
+        if self.place_player_to_cell(g_idx, row):
+            # защита от «двойного клика по пустой»
+            import time
+            self._last_placed = (g_idx, row, time.time())
 
     def place_player_to_cell(self, group_idx, row):
-        """Размещает следующего игрока на указанную ячейку (row = 2 или 3)."""
-        players = self.available_players[self.current_sf]
-        if self.current_player_idx >= len(players):
+        """Ставит следующего игрока на (group_idx, row) и, если row==2,
+        автоматически подставляет партнёра из того же QG на 4-е место.
+        Возвращает True/False.
+        """
+        if row not in (2, 3):
+            return False
+
+        pool = self.available_players[self.current_sf]
+        if self.current_player_idx >= len(pool):
             QMessageBox.information(self, "Информация", "Нет доступных игроков!")
-            return
+            return False
 
         groups = self.sf_groups[self.current_sf]
         group = groups[group_idx]
 
-        # Проверяем, свободна ли ячейка
         if len(group) > row and group[row] is not None:
-            QMessageBox.warning(self, "Ошибка", "Эта ячейка уже занята!")
-            return
+            return False
 
-        # Берём следующего игрока
-        qual_group, athlete = players[self.current_player_idx]
-        # athlete — это уже «внутренний» игрок; если он dict — распакуем
+        qual_group, athlete = pool[self.current_player_idx]
         if isinstance(athlete, dict):
             athlete = athlete['player']
-            
-        # Проверяем конфликт региона с 1-м местом
-        if self._region_conflict_at(group, row, athlete):
-            reply = QMessageBox.question(self, 'Конфликт регионов',
-                f'В группе уже есть игрок из региона {athlete[3]} на 1-м месте.\n'
-                f'Все равно разместить {athlete[1]} на 3-е место?',
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if reply == QMessageBox.No:
-                return
 
-        # Размещаем игрока на позицию row
+        # Конфликт региона 1↔3 — только для row == 2
+        if self._region_conflict_at(group, row, athlete):
+            reply = QMessageBox.question(
+                self, 'Конфликт регионов',
+                f'В группе уже есть игрок из региона {athlete[3]} на 1-м месте.\n'
+                f'Всё равно разместить {athlete[1]} на 3-е место?',
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return False
+
+        # 1) ставим
         while len(group) <= row:
             group.append(None)
         group[row] = athlete
-        self.current_player_idx += 1
 
-        # Теперь автоматически заполняем 4-ю позицию (если это 3-я) парой из той же квалификационной группы
-        if row == 2:   # только что поставили игрока на 3-ю позицию SF-группы
-           # в блоке авто-партнёра (когда только что поставили row == 2):
-            partner_idx = 1 if self.current_sf == 0 else 3   # 2-е или 4-е место
+        # 2) сразу удаляем его из пула
+        athlete_id = self._pid(athlete)
+        for idx, (q, p) in enumerate(pool):
+            if self._pid(p) == athlete_id and q == qual_group:
+                del pool[idx]
+                break
 
+        # 3) если это 3-я позиция — ищем партнёра из того же QG и ставим на 4-ю
+        if row == 2:
+            partner_idx = 1 if self.current_sf == 0 else 3
             partner = None
             for qg, players_list in self.groups_data:
                 if qg == qual_group:
-                    if len(players_list) > partner_idx:
+                    if partner_idx < len(players_list):
                         partner = players_list[partner_idx]
                     break
 
-            partner_id = self._pid(partner)
-            found = False
-            for idx, (q, p) in enumerate(self.available_players[self.current_sf]):
-                if self._pid(p) == partner_id and q == qual_group:
-                    del self.available_players[self.current_sf][idx]
-                    if idx < self.current_player_idx:
-                        self.current_player_idx -= 1
-                    found = True
-                    break
+            if partner is not None:
+                partner_id = self._pid(partner)
+                # не ставим, если партнёр уже где-то в текущем SF
+                if partner_id not in self._placed_ids(self.current_sf):
+                    # и должен быть в пуле
+                    for idx, (q, p) in enumerate(pool):
+                        if self._pid(p) == partner_id and q == qual_group:
+                            del pool[idx]
+                            break
+                    # ставим на 4-ю
+                    while len(group) <= 3:
+                        group.append(None)
+                    if group[3] is None:
+                        group[3] = partner
 
-            if found:
-                group[3] = partner
+        # 4) страховка: чистим пул от уже размещённых и дублей
+        self._clean_pool(self.current_sf)
 
-        # Обновляем интерфейс
+        # 5) индекс всегда = длина пула - оставшиеся? Нет: индекс — «следующий».
+        #    Если он ушёл за границу, подрежем (в _clean_pool это уже есть).
+        if self.current_player_idx > len(self.available_players[self.current_sf]):
+            self.current_player_idx = len(self.available_players[self.current_sf])
+
         self.update_interface()
 
-        # Проверяем, все ли заполнено
-        if self.current_player_idx >= len(players):
+        if not self.available_players[self.current_sf]:
             QMessageBox.information(self, "Завершено", "Все игроки распределены!")
+
+        return True
 
     def _find_qual_group(self, athlete):
         """Номер квалификационной группы, откуда пришёл игрок."""
@@ -2060,6 +2112,15 @@ class SemiFinalManual(QDialog):
                 pl = entry['player'] if isinstance(entry, dict) else entry
                 if pl and pl[0] == aid:
                     return qg
+        return None
+
+    def _find_sf_group(self, athlete):
+        """Номер SF-группы (1..16) текущего полуфинала, где сейчас стоит игрок."""
+        aid = self._pid(athlete)
+        groups = self.sf_groups[self.current_sf]
+        for g_idx, g in enumerate(groups):
+            if any(self._pid(a) == aid for a in g if a):
+                return g_idx + 1
         return None
 
     def _pid(self, athlete):
@@ -2072,33 +2133,90 @@ class SemiFinalManual(QDialog):
             return pl[0] if pl else None
         return athlete[0]
 
-    def reset_current_sf(self):
-        """Сброс текущего полуфинала (очищает 3-и и 4-е места, возвращает игроков в список)."""
-        reply = QMessageBox.question(self, 'Сброс', 'Очистить все 3-и и 4-е места текущего полуфинала?',
-                                     QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            groups = self.sf_groups[self.current_sf]
-            # Собираем игроков с позиций 2 и 3 (индексы 2,3)
-            removed = []
-            for g in groups:
-                for row in range(2, self.players_per_group):
-                    if len(g) > row and g[row] is not None:
-                        removed.append((g[row], self.current_sf))
-                        g[row] = None
-            # Возвращаем игроков в список доступных (в начало, чтобы их можно было снова распределить)
-            # Для простоты просто добавляем в конец
-            for player, _ in removed:
-                # Находим квалификационную группу этого игрока
-                qual_group = None
-                for qg, pl in self.groups_data:
-                    if player in pl:
-                        qual_group = qg
-                        break
-                if qual_group is not None:
-                    self.available_players[self.current_sf].append((qual_group, player))
-            self.current_player_idx = 0
-            self.update_interface()
+    def _pool_has(self, sf, athlete):
+        aid = self._pid(athlete)
+        return any(self._pid(p) == aid for _q, p in self.available_players[sf])
 
+    def _return_to_pool(self, sf, entries):
+        pool = self.available_players[sf]
+        placed = self._placed_ids(sf)
+        existing = {self._pid(p) for _q, p in pool}
+
+        for qg, athlete in entries:
+            aid = self._pid(athlete)
+            if aid is None:
+                continue
+            # уже где-то стоит в группе — не возвращаем
+            if aid in placed:
+                continue
+            # уже есть в пуле — пропускаем дубль
+            if aid in existing:
+                continue
+            pool.append((qg, athlete))
+            existing.add(aid)
+
+        pool.sort(key=lambda x: x[0])
+
+    def _placed_ids(self, sf=None):
+        """Множество ID всех игроков, которые сейчас размещены в sf_groups[sf]."""
+        sf = self.current_sf if sf is None else sf
+        ids = set()
+        for group in self.sf_groups[sf]:
+            for a in group:
+                if a:
+                    aid = self._pid(a)
+                    if aid is not None:
+                        ids.add(aid)
+        return ids
+
+    def _clean_pool(self, sf=None):
+        """Удаляет из available_players[sf] всех, кто уже размещён в группах,
+        и дубли по ID. Сохраняет порядок QG."""
+        sf = self.current_sf if sf is None else sf
+        placed = self._placed_ids(sf)
+        seen = set()
+        cleaned = []
+        for qg, athlete in self.available_players[sf]:
+            aid = self._pid(athlete)
+            if aid is None:
+                continue
+            if aid in placed or aid in seen:
+                continue
+            seen.add(aid)
+            cleaned.append((qg, athlete))
+        cleaned.sort(key=lambda x: x[0])
+        self.available_players[sf] = cleaned
+
+        # подрезать индекс, если он ушёл за границу
+        if self.current_player_idx > len(cleaned):
+            self.current_player_idx = len(cleaned)
+
+    def reset_current_sf(self):
+        if QMessageBox.question(
+            self, 'Сброс',
+            'Очистить все 3-и и 4-е места текущего полуфинала?\n\n'
+            'Игроки вернутся в список доступных.',
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+        ) != QMessageBox.Yes:
+            return
+
+        groups = self.sf_groups[self.current_sf]
+        to_pool = []
+        for g in groups:
+            for pos in (2, 3):
+                if len(g) > pos and g[pos] is not None:
+                    athlete = g[pos]
+                    qg = self._find_qual_group(athlete)
+                    g[pos] = None
+                    if qg is not None:
+                        to_pool.append((qg, athlete))
+
+        self._return_to_pool(self.current_sf, to_pool)
+        self._clean_pool(self.current_sf)   # страховка: убрать случайные дубли/уже размещённых
+        self.current_player_idx = 0
+        self._last_placed = None
+        self.update_interface()
+    
     def auto_fill_remaining(self):
         """Автоматически заполняет все оставшиеся 3-и и 4-е места (без ручного выбора)."""
         # Просто последовательно размещаем всех доступных игроков
