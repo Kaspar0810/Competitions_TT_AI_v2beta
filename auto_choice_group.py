@@ -292,10 +292,7 @@ def save_choice_results(self, results):
         # Получаем систему
         system = System.select().where((System.stage == "Квалификация") & (System.title_id == self.current_title_id)).get()
         id_system = system.id
-        
-        # # Очищаем старые данные Choice
-        # Choice.delete().where(Choice.title_id == self.current_title_id).execute()
-        
+
         # Сохраняем новые результаты
         for result in results:
             Choice.update(

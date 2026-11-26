@@ -93,11 +93,13 @@ class ChoiceActionDialog(QDialog):
 
 # ========== ОСНОВНОЙ КЛАСС ЖЕРЕБЬЕВКИ ==========
 class ChoiceGroupManual(QDialog):
-    def __init__(self, athletes, num_groups, id_title, sex, parent=None, existing_data=None):
+    def __init__(self, athletes, num_groups, id_title, sex, parent=None, existing_data=None, main_window=None):
         super().__init__(parent)
         self.athletes = athletes
         self.sorted_athletes = []
         self.groups = []
+        self.id_title = id_title
+        self.main_window = main_window
         self.num_groups = num_groups
         self.current_athlete_index = 0
         self.group_tables = []
@@ -1439,19 +1441,21 @@ class ChoiceGroupManual(QDialog):
         return results
 # ==== вариант восстановления сохранения ===
     def save_to_database(self):
-        """Сохраняет результаты жеребьёвки в Choice (по текущему title_id/sex/stage).
-        Возвращает True при успехе."""
+        """Choice + Game_list + Result (по реальной модели) + System + Title.tabs."""
+        import datetime
+
         try:
-            # System для квалификации (по текущему турниру/полу/этапу)
             stage = "Квалификация"
+
+            # ---------- System ----------
             system = System.get_or_none(
-                (System.title_id == self.title_id) &
+                (System.title_id == self.id_title) &
                 (System.sex == self.sex) &
                 (System.stage == stage)
             )
             if not system:
                 system = System.create(
-                    title_id=self.title_id,
+                    title_id=self.id_title,
                     sex=self.sex,
                     stage=stage,
                     total_group=self.num_groups,
@@ -1460,55 +1464,155 @@ class ChoiceGroupManual(QDialog):
                     score_flag=5,
                 )
             else:
-                # обновим параметры на случай смены количества групп
                 system.total_group = self.num_groups
                 system.max_player = self.max_rows_per_group
                 if not getattr(system, "sex", None):
                     system.sex = self.sex
                 system.save()
 
-            # Сбрасываем только записи этого турнира/пола
-            Choice.update(
-                group=None, posev_group=None
-            ).where(
-                (Choice.title_id == self.title_id) &
+            # ---------- Очистка ----------
+            Game_list.delete().where(
+                (Game_list.title_id == self.id_title) &
+                (Game_list.system_id == system.id)
+            ).execute()
+            Result.delete().where(
+                (Result.title_id == self.id_title) &
+                (Result.system_id == system.id)
+            ).execute()
+            Choice.update(group=None, posev_group=None).where(
+                (Choice.title_id == self.id_title) &
                 (Choice.sex == self.sex)
             ).execute()
 
-            # Записываем позиции
+            # ---------- Choice + Game_list ----------
             for group_idx, group in enumerate(self.groups):
                 gr_num = group_idx + 1
+                group_name = f"{gr_num} группа"
                 for posev_group, athlete in enumerate(group, 1):
                     if not athlete:
                         continue
 
                     choice = Choice.get_or_none(
-                        (Choice.title_id == self.title_id) &
+                        (Choice.title_id == self.id_title) &
                         (Choice.sex == self.sex) &
                         (Choice.player_choice_id == athlete[0])
                     )
                     if not choice:
-                        # На всякий случай: если игрока нет в Choice — создаём
                         choice = Choice.create(
-                            title_id=self.title_id,
+                            title_id=self.id_title,
                             sex=self.sex,
                             player_choice_id=athlete[0],
                             system_id=system.id,
                         )
-                    choice.group = f"{gr_num} группа"
+                    choice.group = group_name
                     choice.posev_group = posev_group
                     choice.system_id = system.id
                     choice.save()
 
-            # Флаг выбора
+                    Game_list.create(
+                        number_group=group_name,
+                        rank_num_player=posev_group,
+                        player_group=athlete[0],
+                        system_id=system.id,
+                        title_id=self.id_title,
+                        player_double_id=None,
+                        team_id=None,
+                        sex=self.sex,
+                    )
+
+            # ---------- Result ----------
+            max_players = max(
+                (len([a for a in g if a]) for g in self.groups), default=0
+            )
+
+            tours_all = []
+            if max_players >= 2:
+                if (getattr(self, "main_window", None) is not None
+                        and hasattr(self.main_window, "tours_list")):
+                    tours_all = self.main_window.tours_list(max_players)
+
+            def _fio_region(pid):
+                p = Player.get_or_none(Player.id == pid)
+                if not p:
+                    return f"ID{pid}"
+                return f"{p.fio} ({p.region})"
+
+            for group_idx, group in enumerate(self.groups):
+                gr_num = group_idx + 1
+                group_name = f"{gr_num} группа"
+                players = [a for a in group if a]
+                num_players = len(players)
+                if num_players < 2:
+                    continue
+
+                for round_idx, round_matches in enumerate(tours_all, start=1):
+                    for match in round_matches:
+                        p1s, p2s = match.split('-')
+                        p1_idx = int(p1s) - 1
+                        p2_idx = int(p2s) - 1
+                        if p1_idx >= num_players or p2_idx >= num_players:
+                            continue
+
+                        player1 = players[p1_idx]
+                        player2 = players[p2_idx]
+
+                        p1_name = _fio_region(player1[0])
+                        p2_name = _fio_region(player2[0])
+
+                        # дубль (в обе стороны)
+                        exists = Result.get_or_none(
+                            (Result.title_id == self.id_title) &
+                            (Result.system_id == system.id) &
+                            (
+                                ((Result.player1 == p1_name) & (Result.player2 == p2_name)) |
+                                ((Result.player1 == p2_name) & (Result.player2 == p1_name))
+                            )
+                        )
+                        if exists:
+                            continue
+
+                        Result.create(
+                            system_stage=stage,
+                            number_group=group_name,
+                            tours=match,
+                            player1=p1_name,
+                            player2=p2_name,
+                            title_id=self.id_title,
+                            system_id=system.id,
+                            round=str(round_idx),
+                            sex=self.sex,
+                            schedule_date=None,
+                            schedule_time=None,
+                            schedule_table=None,
+                            stage_net=None,          # "Квалификация" — 12 символов, влезает в CharField(15)
+                        )
+
+            # ---------- flag ----------
             system.choice_flag = True
             system.save()
 
+            # ---------- Title.tab_enabled += "Результаты" ----------
+            try:
+                title = Title.get_or_none(Title.id == self.id_title)
+                if title:
+                    current = (title.tab_enabled or "").strip()
+                    tabs = [t.strip() for t in current.split(",") if t.strip()]
+                    # Добавляем вкладку Результаты после жеребьевки, если её нет
+                    if "Результаты" not in tab_enabled:
+                        tab_enabled += " Результаты"
+                        title.tab_enabled = tab_enabled
+                        title.save()
+                    # Обновляем активность вкладок
+                    self.main_window.update_tabs_enabled()
+            except Exception as e:
+                print(f"[save_to_database] tab_enabled update failed: {e}")
+
             QMessageBox.information(
                 self, "Успех",
-                f"Результаты сохранены.\n"
-                f"Распределено спортсменов: "
-                f"{sum(1 for g in self.groups for a in g if a)}"
+                f"Сохранено:\n"
+                f"• Choice — {sum(1 for g in self.groups for a in g if a)} игр.\n"
+                f"• Game_list — {Game_list.select().where(Game_list.system_id == system.id).count()} строк.\n"
+                f"• Result — {Result.select().where(Result.system_id == system.id).count()} матчей."
             )
             return True
 
@@ -1543,16 +1647,6 @@ class ChoiceGroupManual(QDialog):
             self.update_round_display()
         except Exception as e:
             print(f"[toggle_fullscreen] refresh failed: {e}")
-# ===========
-# def load_existing_draw_from_db(id_title, current_sex):
-#     """Загрузка существующей жеребьевки из базы данных через Peewee"""
-#     choices = Choice.select().where((Choice.title_id == id_title) & (Choice.sex == current_sex))
-#     try:
-#         results = choices.select().order_by(Choice.group, Choice.posev_group)
-#         return list(results) if results.exists() else None
-#     except Exception as e:
-#         print(f"Ошибка при загрузке из базы данных: {e}")
-#         return None
 
 def load_existing_draw_from_db(id_title, current_sex, stage="Квалификация"):
     system = System.get_or_none(
@@ -1565,32 +1659,10 @@ def load_existing_draw_from_db(id_title, current_sex, stage="Квалифика�
     q = (Choice.select()
          .where((Choice.title_id == id_title) &
                 (Choice.sex == current_sex) &
-                (Choice.system_id == system.id) &
                 (Choice.group.is_null(False)) &
                 (Choice.posev_group.is_null(False)))
          .order_by(Choice.group, Choice.posev_group))
     return list(q) if q.exists() else None
-
-# def clear_db_before_choice(self, stage):
-#     """очищает базу данных -Game_list- и -Result- перед повторной жеребьевкой групп"""
-
-#     systems = System.select().where((System.stage == stage) & (System.title_id == self)).get()
-#     id_system = systems.id
-
-#     gamelist = Game_list.select().where((Game_list.title_id == self) & (Game_list.system_id == id_system))
-#     for i in gamelist:
-#         gl_d = Game_list.get(Game_list.id == i)
-#         gl_d.delete_instance()
-#     results = Result.select().where((Result.title_id == self) & (Result.system_id == id_system))
-#     for i in results:
-#         r_d = Result.get(Result.id == i)
-#         r_d.delete_instance()
-#     choice = Choice.select().where(Choice.title_id == self)
-#     for i in choice:
-#         if stage == "Квалификация":
-#             Choice.update(group = None, posev_group=None).where(Choice.id == i).execute()
-#         else:
-#             Choice.update(final = None, posev_final=None).where(Choice.id == i).execute()
 
 def clear_db_before_choice(title_id, sex, stage="Квалификация"):
     system = System.get_or_none(
@@ -1725,6 +1797,7 @@ def choice_group_manual(self, athletes, num_groups, stage, parent=None):
         self.current_sex,
         parent=parent,
         existing_data=existing_data,
+        main_window=self,
     )
     if dialog.exec_() == QDialog.Accepted:
         return dialog.get_results()

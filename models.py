@@ -282,10 +282,10 @@ class Result(BaseModel):
     round = CharField(20, null=True)
     system_id = ForeignKeyField(System)
     sex = CharField(10)
-    schedule_date = DateField()
-    schedule_time = TimeField()
-    schedule_table = CharField()
-    stage_net = CharField(15)
+    schedule_date = DateField(null=True)
+    schedule_time = TimeField(null=True)
+    schedule_table = CharField(null=True)
+    stage_net = CharField(15, null=True)
     
     class Meta:
         db_table = "results"

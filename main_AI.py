@@ -12118,9 +12118,6 @@ class MainWindow(QMainWindow):
 
     def update_tabs_enabled(self):
         """Обновление активности вкладок в зависимости от tab_enabled."""
-        # import time
-        # start_time = time.perf_counter()
-
         if not self.current_title_id:
             self.tab_widget.blockSignals(True)
             try:
@@ -12187,10 +12184,6 @@ class MainWindow(QMainWindow):
                     self.on_tab_changed(self.tab_widget.currentIndex())
                 except Exception as e:
                     print(f"on_tab_changed после update_tabs_enabled: {e}")
-
-            # print(f"Активированы вкладки: {tab_enabled.split()}")
-            # end_time = time.perf_counter()
-            # print(f"update_tabs_enabled выполнено за {end_time - start_time:.4f} сек")
 
         except Exception as e:
             import traceback
