@@ -1535,7 +1535,7 @@ class ChoiceGroupManual(QDialog):
                 p = Player.get_or_none(Player.id == pid)
                 if not p:
                     return f"ID{pid}"
-                return f"{p.fio} ({p.region})"
+                return p.fio_city
 
             for group_idx, group in enumerate(self.groups):
                 gr_num = group_idx + 1
@@ -1595,9 +1595,7 @@ class ChoiceGroupManual(QDialog):
             try:
                 title = Title.get_or_none(Title.id == self.id_title)
                 if title:
-                    current = (title.tab_enabled or "").strip()
-                    tabs = [t.strip() for t in current.split(",") if t.strip()]
-                    # Добавляем вкладку Результаты после жеребьевки, если её нет
+                    tab_enabled = title.tab_enabled if title.tab_enabled else "Титул"                
                     if "Результаты" not in tab_enabled:
                         tab_enabled += " Результаты"
                         title.tab_enabled = tab_enabled

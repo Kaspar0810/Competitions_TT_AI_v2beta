@@ -14640,11 +14640,6 @@ class MainWindow(QMainWindow):
                                     "Нет добавленных этапов.\n"
                                     "Создайте новый этап с помощью кнопки 'Добавить этап'")
                 return
-        # try:
-        #     # Получаем выбранный этап
-        #     if not hasattr(self, 'stages_list') or not self.stages_list:
-        #         QMessageBox.warning(self, "Ошибка", "Нет добавленных этапов для редактирования")
-        #         return
             
             # Создаем диалог выбора этапа
             dialog = QDialog(self)
@@ -15406,7 +15401,12 @@ class MainWindow(QMainWindow):
             if total_players <= all_posev_player:
                 self.fill_choice_table()
                 self.get_or_create_x_player()
-
+                # Добавляем вкладку Результаты после жеребьевки, если её нет
+                tab_enabled = title.tab_enabled if title.tab_enabled else "Титул"                
+                if "Система" not in tab_enabled:
+                    tab_enabled += " Система"
+                    title.tab_enabled = tab_enabled
+                    title.save()
                 # ─── Спросить про суперфинал ───
                 has_superfinal = self._ask_create_superfinal()
                 if has_superfinal:
@@ -15420,6 +15420,7 @@ class MainWindow(QMainWindow):
                     f"Провести жеребьевку квалификации сейчас?",
                     QMessageBox.Yes | QMessageBox.No)
                 if reply == QMessageBox.Yes:
+                    
                     self.perform_drawing()
 
     def _ask_create_superfinal(self):
