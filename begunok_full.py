@@ -164,13 +164,14 @@ class BegunokPDF:
         
         # Строка 6: =[1]Список!A3
         row6 = [""] * cols
-        row6[0] = f"{data.get('sredi', '_____')}"
+        row6[0] = f"{data.get('sredi_str', '_____')}"
         row6[23] = "Стадия"
         row6[28] = f"{data.get('stage', '_____')}"
         table_data.append(row6)
         
         # Строка 7: пустая + Матч №
         row7 = [""] * cols
+        row7[0] = f"{data.get('runners_string', '_____')}"
         row7[23] = "Матч №"
         row7[28] = f"{data.get('match_num', '___')}"
         table_data.append(row7)
@@ -297,9 +298,6 @@ class BegunokPDF:
         row31 = [""] * cols
         table_data.append(row31)
 
-        # Создание таблицы с точными размерами колонок
-        # col_widths = [col_width] * cols
-
     #   Создание таблицы - ИСПРАВЛЕНО: используем правильные имена параметров
         col_widths_list = [col_width] * cols
         row_heights_list = [row_height] * rows
@@ -371,7 +369,8 @@ class BegunokPDF:
             ('ALIGN', (0, 3), (20, 3), 'CENTER'),  # Протокол
             ('ALIGN', (0, 4), (20, 4), 'CENTER'),  # соревнования
             ('ALIGN', (0, 5), (20, 5), 'CENTER'),  # название
-            ('ALIGN', (0, 6), (20, 6), 'CENTER'),  # среди
+            ('ALIGN', (0, 6), (20, 6), 'CENTER'),  # среди 
+            ('ALIGN', (0, 7), (20, 7), 'CENTER'),  # текст            
             ('ALIGN', (8, 9), (10, 9), 'CENTER'),  # Рейтинг
             ('ALIGN', (0, 9), (8, 9), 'CENTER'),  # ФИО
             ('ALIGN', (10, 9), (15, 9), 'CENTER'),  # Субъект
@@ -394,6 +393,7 @@ class BegunokPDF:
             ('SPAN', (0, 4), (22, 4)),  # =[1]Список!A1
             ('SPAN', (0, 5), (22, 5)),  # =[1]Список!A2
             ('SPAN', (0, 6), (22, 6)),  # =[1]Список!A3
+            ('SPAN', (0, 7), (22, 7)),  # =[1]Список!A4
         
             
             # == блок фио, рейтинг, ввод счета

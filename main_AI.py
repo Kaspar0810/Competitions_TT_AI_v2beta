@@ -31511,7 +31511,66 @@ class MainWindow(QMainWindow):
         if self.stage_for_runner_combo.count() > 0:
             self.stage_for_runner_combo.setCurrentIndex(0)
             self.sync_runner_stage_to_schedule(self.stage_for_runner_combo.currentText())
+# ====== new
+    # def update_runner_stages(self):
+    #     """Список этапов для печати бегунков с учётом пола и смешанных (mix)."""
+    #     self.stage_for_runner_combo.blockSignals(True)
+    #     self.stage_for_runner_combo.clear()
 
+    #     if not self.current_title_id:
+    #         self.stage_for_runner_combo.blockSignals(False)
+    #         return
+
+    #     sex = self.current_sex if self.current_sex else "man"
+
+    #     # Свои этапы + все смешанные (mix)
+    #     stages = System.select().where(
+    #         (System.title_id == self.current_title_id) &
+    #         (System.sex.in_([sex, "mix"]))
+    #     ).order_by(System.id)
+
+    #     for stage in stages:
+    #         razryad = self._detect_razryad_for_stage(stage)
+    #         display = f"{stage.stage} — {razryad}"
+    #         self.stage_for_runner_combo.addItem(display, stage.id)
+    #         idx = self.stage_for_runner_combo.count() - 1
+    #         # Дополнительные данные для последующего использования
+    #         self.stage_for_runner_combo.setItemData(idx, stage.stage,  Qt.UserRole + 1)  # имя этапа
+    #         self.stage_for_runner_combo.setItemData(idx, razryad,       Qt.UserRole + 2)  # разряд
+    #         self.stage_for_runner_combo.setItemData(idx, stage.sex,     Qt.UserRole + 3)  # пол этапа
+
+    #     self.stage_for_runner_combo.blockSignals(False)
+
+    #     if self.stage_for_runner_combo.count() > 0:
+    #         self.stage_for_runner_combo.setCurrentIndex(0)
+    #         self.sync_runner_stage_to_schedule(self.get_current_runner_stage_name())
+
+
+    # def get_current_runner_stage_name(self):
+    #     """Имя текущего этапа из itemData (без разряда в строке)."""
+    #     idx = self.stage_for_runner_combo.currentIndex()
+    #     if idx < 0:
+    #         return ""
+    #     name = self.stage_for_runner_combo.itemData(idx, Qt.UserRole + 1)
+    #     return name or self.stage_for_runner_combo.currentText()
+
+
+    # def get_current_runner_razryad(self):
+    #     idx = self.stage_for_runner_combo.currentIndex()
+    #     if idx < 0:
+    #         return "Одиночный разряд"
+    #     return (self.stage_for_runner_combo.itemData(idx, Qt.UserRole + 2)
+    #             or "Одиночный разряд")
+
+
+    # def get_current_runner_stage_sex(self):
+    #     idx = self.stage_for_runner_combo.currentIndex()
+    #     if idx < 0:
+    #         return self.current_sex or "man"
+    #     return (self.stage_for_runner_combo.itemData(idx, Qt.UserRole + 3)
+    #             or self.current_sex or "man")
+
+#============
     def update_schedule_stages(self):
         """Обновление списка этапов для расписания с учётом пола"""
         self.schedule_stage_combo.blockSignals(True)
@@ -32082,19 +32141,25 @@ class MainWindow(QMainWindow):
                         os.system(f'open "{filename}"')
             else:
                 QMessageBox.warning(self, "Ошибка", "Не удалось создать бегунки")
-
+# =========== ld
     def print_full_runners_with_filters(self, stage_name, subgroup, only_unplayed=True):
         """Печать полных бегунков с учётом текущих фильтров расписания"""
         from begunok_full import BegunokPDF
         import os
         import re
 
+        razryad_comp = "Одиночный разряд"
+        doubles_list = ["Мужские пары", "Женские пары", "Смешанные пары"]
+        group_list = ["Квалификация", "Квалификация. 1-й полуфинал", "Квалификация. 2-й полуфинал"]
+
         try:
             # Название соревнования
             title = Title.get_or_none(Title.id == self.current_title_id)
             comp_name = title.name
-            sredi = f"среди {title.sredi} {title.vozrast}"
-
+            sredi_str = f"среди {title.sredi} {title.vozrast}"
+            sredi = title.sredi
+            text_combo = self.stage_for_runner_combo.currentText()
+                       
             # Вспомогательная функция для безопасного получения текста ячейки
             def get_item_text(row, col):
                 item = self.schedule_table.item(row, col)
@@ -32117,13 +32182,27 @@ class MainWindow(QMainWindow):
                 stage = get_item_text(row, 7)
                 match = get_item_text(row, 8)
 
+                # ==== my ======
+                # Определяем пол
+                sex_label = self.gamer_on_title(sredi)
+                
+                if text_combo not in doubles_list:
+                    razryad_comp = "Одиночный разряд"
+                    if text_combo in group_list:
+                        runners_string = f"{razryad_comp}. {text_combo}. {sex_label[0]}. {group}"
+                    else:
+                        runners_string = f"{razryad_comp}. {text_combo}. {sex_label[0]}."
+                else:
+                    razryad_comp = text_combo
+                # =============
+
                 if not player1 and not player2:
                     continue  # пропускаем пустые строки
 
                 matches_data.append({
                     'comp_name':comp_name,
-                    'sredi':sredi,
-                    'group': group or stage_name,
+                    'sredi':sredi_str,
+                    'group': group,
                     'tour': tour,
                     'match': match,
                     'date': date,
@@ -32131,7 +32210,8 @@ class MainWindow(QMainWindow):
                     'table': table,
                     'player1': player1,
                     'player2': player2,
-                    'stage': stage
+                    'stage': stage,
+                    'runners_string': runners_string
                 })
 
             if not matches_data:
@@ -32157,7 +32237,7 @@ class MainWindow(QMainWindow):
                         "печатать нечего."
                     )
                     return
-            
+                
             # Папка для сохранения
             pdf_dir = "runners"
             if not os.path.exists(pdf_dir):
@@ -32175,12 +32255,13 @@ class MainWindow(QMainWindow):
             for m in matches_data:
                 begunki_data.append({
                     'comp_name':comp_name,
-                    'sredi':sredi,
+                    'sredi_str':sredi_str,
                     'date': m['date'],
                     'time': m['time'],
                     'table': m['table'],
                     'match_num': m['tour'],
                     'stage': m['stage'],
+                    'runners_string': m['runners_string'],
                     'player1': self._parse_player_for_runner_full(m['player1'])['name'],
                     'city1': self._parse_player_for_runner_full(m['player1'])['city'],
                     'rank1': self._parse_player_for_runner_full(m['player1'])['rank'],
@@ -32210,7 +32291,181 @@ class MainWindow(QMainWindow):
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось создать бегунки: {str(e)}")
+# =========== new ===========
+    
 
+
+    # def print_full_runners_with_filters(self, stage_name, subgroup, only_unplayed=True):
+    #     from begunok_full import BegunokPDF
+    #     import os
+    #     import re
+
+    #     try:
+    #         title = Title.get_or_none(Title.id == self.current_title_id)
+    #         comp_name = title.name
+    #         sredi = f"среди {title.sredi} {title.vozrast}"
+
+    #         # ---- разряд / пол / категория из текущего выбора ----
+    #         razryad = self.get_current_runner_razryad()
+    #         stage_sex = self.get_current_runner_stage_sex() or "man"
+    #         category_short = _short_category(title.sredi or "") if title else ""
+
+    #         def _description(group_name):
+    #             """Пример: 'Одиночный разряд. Квалификация. Юниорки. Группа 1'."""
+    #             parts = [razryad, stage_name]
+
+    #             if (stage_sex or "").lower() == "mix":
+    #                 parts.append("Смешанные пары")
+    #             elif category_short:
+    #                 parts.append(category_short)
+
+    #             group_label = _format_group(group_name)
+    #             if group_label:
+    #                 parts.append(group_label)
+
+    #             return ". ".join(p for p in parts if p)
+
+    #         def get_item_text(row, col):
+    #             item = self.schedule_table.item(row, col)
+    #             return item.text() if item else ""
+
+    #         def _short_category(sredi):
+    #             """'юниорок' / 'среди юниорок юниорского возраста' → 'Юниорки'."""
+    #             if not sredi:
+    #                 return ""
+    #             s = sredi.strip()
+    #             if s.lower().startswith("среди "):
+    #                 s = s[6:]
+    #             word = s.split()[0] if s.split() else ""
+    #             word = word.capitalize()
+    #             if word.lower().endswith(("ок", "ек")):
+    #                 return word[:-2] + "ки"
+    #             if word.lower().endswith(("ов", "ев")):
+    #                 return word[:-2] + "ы"
+    #             return word
+        
+        
+    #         def _format_group(g):
+    #             """'1 группа' → 'Группа 1'. Пустое остаётся пустым."""
+    #             g = (g or "").strip()
+    #             if not g:
+    #                 return ""
+    #             if g.lower().endswith("группа"):
+    #                 num = g[:-6].strip()
+    #                 return f"Группа {num}" if num else g
+    #             if g.lower().startswith("группа"):
+    #                 return g.capitalize()
+    #             return g
+
+    #         matches_data = []
+    #         for row in range(self.schedule_table.rowCount()):
+    #             if self.schedule_table.isRowHidden(row):
+    #                 continue
+
+    #             tour     = get_item_text(row, 0)
+    #             group    = get_item_text(row, 1)
+    #             player1  = get_item_text(row, 2)
+    #             player2  = get_item_text(row, 3)
+    #             date     = get_item_text(row, 4)
+    #             time     = get_item_text(row, 5)
+    #             table    = get_item_text(row, 6)
+    #             stage    = get_item_text(row, 7)
+    #             match    = get_item_text(row, 8)
+
+    #             if not player1 and not player2:
+    #                 continue
+
+    #             matches_data.append({
+    #                 'comp_name':   comp_name,
+    #                 'sredi':       sredi,
+    #                 'description': _description(group),   # <-- NEW: строка 6
+    #                 'group':       group,
+    #                 'tour':        tour,
+    #                 'match':       match,
+    #                 'date':        date,
+    #                 'time':        time,
+    #                 'table':       table,
+    #                 'player1':     player1,
+    #                 'player2':     player2,
+    #                 'stage':       stage,
+    #             })
+
+    #         if not matches_data:
+    #             QMessageBox.warning(self, "Ошибка",
+    #                                 "Нет данных для печати бегунков.")
+    #             return
+
+    #         # --- NEW: отсеиваем уже сыгранные матчи ---
+    #         if only_unplayed:
+    #             played_set = self._build_played_matches_set()
+    #             before = len(matches_data)
+    #             matches_data = [
+    #                 m for m in matches_data
+    #                 if self._match_key(m['player1'], m['player2'], m['tour']) not in played_set
+    #             ]
+    #             print(f"[runners] отфильтровано сыгранных: "
+    #                 f"{before - len(matches_data)} из {before}")
+    #             if not matches_data:
+    #                 QMessageBox.information(
+    #                     self, "Нет несыгранных встреч",
+    #                     "Все встречи по текущему фильтру уже сыграны — "
+    #                     "печатать нечего."
+    #                 )
+    #                 return
+
+    #         pdf_dir = "runners"
+    #         if not os.path.exists(pdf_dir):
+    #             os.makedirs(pdf_dir)
+
+    #         title = Title.get_by_id(self.current_title_id)
+    #         short_name = title.short_name_comp or title.name
+    #         clean_name = re.sub(r'[\\/*?:"<>|]', "", str(short_name))
+    #         clean_name = clean_name[:50] if len(clean_name) > 50 else clean_name
+
+    #         filename = os.path.join(pdf_dir, f"{clean_name}_full_runners.pdf")
+
+    #         begunki_data = []
+    #         for m in matches_data:
+    #             p1 = self._parse_player_for_runner_full(m['player1'])
+    #             p2 = self._parse_player_for_runner_full(m['player2'])
+    #             begunki_data.append({
+    #                 'comp_name':   m['comp_name'],
+    #                 'sredi':       m['sredi'],
+    #                 'description': m['description'],   # <-- NEW
+    #                 'date':        m['date'],
+    #                 'time':        m['time'],
+    #                 'table':       m['table'],
+    #                 'match_num':   m['tour'],
+    #                 'stage':       m['stage'],
+    #                 'player1':     p1['name'],
+    #                 'city1':       p1['city'],
+    #                 'rank1':       p1['rank'],
+    #                 'player2':     p2['name'],
+    #                 'city2':       p2['city'],
+    #                 'rank2':       p2['rank'],
+    #             })
+
+    #         pdf = BegunokPDF(filename)
+    #         pdf.add_begunki(begunki_data)
+    #         pdf.save()
+
+    #         QMessageBox.information(self, "Успех",
+    #                                 f"Полные бегунки сохранены в:\n{filename}")
+    #         reply = QMessageBox.question(self, "Открыть файл",
+    #                                     "Открыть созданный PDF файл?",
+    #                                     QMessageBox.Yes | QMessageBox.No)
+    #         if reply == QMessageBox.Yes:
+    #             if sys.platform == 'win32':
+    #                 os.startfile(filename)
+    #             else:
+    #                 os.system(f'open "{filename}"')
+
+    #     except Exception as e:
+    #         import traceback
+    #         traceback.print_exc()
+    #         QMessageBox.critical(self, "Ошибка",
+    #                             f"Не удалось создать бегунки: {str(e)}")
+# =======================
     def _build_played_matches_set(self):
         """
         Один запрос к Result — возвращает set ключей сыгранных матчей.
@@ -32228,7 +32483,50 @@ class MainWindow(QMainWindow):
             played.add(self._match_key(r.player1, r.player2, r.tours))
 
         return played
+    # # ============ хелперы =========
+    # def _detect_razryad(stage_name, title_name=""):
+    #     """Определяет разряд по stage (или по названию турнира).
+    #     System.stage может содержать 'парн'/'микст' — тогда парный."""
+    #     src = f"{stage_name or ''} {title_name or ''}".lower()
+    #     if "смешан" in src or "микст" in src:
+    #         return "Смешанный парный разряд"
+    #     if "парн" in src or "парный" in src:
+    #         if "жен" in src:
+    #             return "Парный женский разряд"
+    #         if "муж" in src:
+    #             return "Парный мужской разряд"
+    #         return "Парный разряд"
+    #     return "Одиночный разряд"
 
+
+    # def _short_category(sredi):
+    #     """'юниорок' / 'среди юниорок юниорского возраста' → 'Юниорки'."""
+    #     if not sredi:
+    #         return ""
+    #     s = sredi.strip()
+    #     if s.lower().startswith("среди "):
+    #         s = s[6:]
+    #     first = s.split()[0] if s.split() else ""
+    #     s = first.capitalize()
+    #     # грубая нормализация родительного → именительного
+    #     for suf in ("ок", "ек", "ов", "ев"):
+    #         if s.lower().endswith(suf):
+    #             return s[:-2] + ("ки" if suf in ("ок", "ек") else "ы")
+    #     return s
+
+
+    # def _format_group(g):
+    #     """'1 группа' / 'группа 1' → 'Группа 1'. Пустое остаётся пустым."""
+    #     g = (g or "").strip()
+    #     if not g:
+    #         return ""
+    #     if g.lower().endswith("группа"):
+    #         num = g[:-6].strip()
+    #         return f"Группа {num}" if num else g
+    #     if g.lower().startswith("группа"):
+    #         return g.capitalize()
+    #     return g
+    #         # ===================
 
     def _match_key(self, player1, player2, tour):
         """
